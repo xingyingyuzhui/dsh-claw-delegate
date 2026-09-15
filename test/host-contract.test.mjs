@@ -77,7 +77,7 @@ test('delegate_handoff parameters are a JSON Schema object', () => {
     },
   })
   apply(ctx)
-  events['agent/session-start']({
+  events['agent/created']({
     agent: {
       session: { header: { cwd: join(tmpdir(), 'DSclaw', 'bot1') } },
       ctx: {
@@ -89,6 +89,7 @@ test('delegate_handoff parameters are a JSON Schema object', () => {
         },
       },
     },
+    source: 'startup',
   })
   assert.equal(registered.name, 'delegate_handoff')
   assert.equal(registered.parameters.type, 'object')
@@ -106,7 +107,7 @@ test('workspace sessions do not get delegate_handoff', () => {
     },
   })
   apply(ctx)
-  events['agent/session-start']({
+  events['agent/created']({
     agent: {
       session: { header: { cwd: join(tmpdir(), 'Desktop', 'project') } },
       ctx: {
@@ -115,6 +116,7 @@ test('workspace sessions do not get delegate_handoff', () => {
         },
       },
     },
+    source: 'startup',
   })
   assert.equal(registered, false)
 })

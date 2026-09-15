@@ -811,8 +811,9 @@ export function apply(ctx) {
     })
     : function () {}
 
+  // DSH 0.1.6+: mount handoff on agent/created so the tool exists before the first turn.
   const stopSessionStart = typeof ctx.on === 'function'
-    ? ctx.on('agent/session-start', (payload) => {
+    ? ctx.on('agent/created', (payload) => {
       mountHandoffTool(payload && payload.agent)
     })
     : function () {}
