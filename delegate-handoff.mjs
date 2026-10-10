@@ -1,3 +1,6 @@
+import { SubagentStaleError } from 'dsh-claw-core/errors'
+import { budgetOf } from './delegate-budget.mjs'
+
 export function taskKeyOf(label, role, fallback) {
   const raw = String(label || '').trim().toLowerCase().replace(/\s+/g, ' ')
   const key = raw || String(fallback || '').trim() || 'task'
@@ -18,6 +21,23 @@ export function isStaleRecord(record, latest) {
 
 export function staleDenyReason() {
   return 'Denied: stale subagent result discarded.'
+}
+
+/**
+ * Shared stale + output-budget gate for child → parent deliveries.
+ * @param {object|null} record child delegate record
+ * @param {object|null} latest latest task pointer for the same parent+taskKey
+ * @param {unknown} content content blocks (or any value passed through trimContentBlocks)
+ * @param {number} [maxOutputBytes] optional override; defaults to budgetOf(record.policy, record)
+ */
+export function prepareChildDelivery(record, latest, content, maxOutputBytes) {
+  if (isStaleRecord(record, latest)) {
+    throw new SubagentStaleError(staleDenyReason())
+  }
+  const max = maxOutputBytes != null
+    ? maxOutputBytes
+    : budgetOf(record && record.policy, record).maxOutputBytes
+  return trimContentBlocks(content, max)
 }
 
 function cutUtf8(buf, keep) {

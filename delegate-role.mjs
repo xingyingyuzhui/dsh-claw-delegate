@@ -1,5 +1,5 @@
-import { applyPreset, isPresetId } from '../dsh-session-permissions/perm-schema.mjs'
-import { asArgs } from '../dsh-session-permissions/perm-schema.mjs'
+import { applyPreset, isPresetId } from 'dsh-claw-permissions/schema'
+import { asArgs } from 'dsh-claw-permissions/schema'
 
 export const DELEGATION_ROLES = ['research', 'developer', 'reviewer', 'release', 'public']
 

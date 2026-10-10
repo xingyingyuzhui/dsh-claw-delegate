@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto'
-import { resolveLayersSync } from '../dsh-session-permissions/perm-layers.mjs'
-import { renderDenyReceipt } from '../dsh-session-permissions/perm-official.mjs'
-import { asArgs, classifyTool } from '../dsh-session-permissions/perm-schema.mjs'
-import { allowExecution, looksLikeDsClaw } from '../dsh-session-permissions/perm-path.mjs'
+import { resolveLayersSync } from 'dsh-claw-permissions/layers'
+import { renderDenyReceipt } from 'dsh-claw-permissions/official'
+import { asArgs, classifyTool } from 'dsh-claw-permissions/schema'
+import { allowExecution, looksLikeDsClaw } from 'dsh-claw-permissions/path'
 import { currentBag, runWithBag } from './delegate-context.mjs'
 import {
   clampStartMaxDepth,
@@ -12,11 +12,9 @@ import {
 } from './delegate-depth.mjs'
 import { budgetDenyReason, budgetOf } from './delegate-budget.mjs'
 import {
-  isStaleRecord,
+  prepareChildDelivery,
   staleDenyReason,
   taskKeyOf,
-  trimContentBlocks,
-  trimHandoff,
 } from './delegate-handoff.mjs'
 import { attenuateChildPolicy, childNeedsWorktree, denyPartialFileAction } from './delegate-policy.mjs'
 import {
@@ -41,10 +39,11 @@ import {
 } from './delegate-store.mjs'
 import { createWriteWorktree, deliverChildHandoff, formatHandoffNote, removeWriteWorktree } from './delegate-worktree.mjs'
 import { applyHandoffToParent, listHandoffs, loadHandoff, persistChildHandoff, rejectHandoff } from './delegate-deliver.mjs'
-import { CODES, operation, runWithTrace, setObserveHome } from '../dsh-observability/observe.mjs'
+import { CODES, operation, runWithTrace, setObserveHome } from 'dsh-claw-observability/observe'
+import { registerJsonRoute } from 'dsh-claw-core/http'
 
-export const name = 'dsh-agent-delegate'
-export const inject = ['tools', 'subagents', 'agents']
+export const name = 'dsh-claw-delegate'
+export const inject = ['tools', 'subagents', 'agents', 'connection']
 
 let dshHome = defaultDshHome()
 let cachedProbe
@@ -179,9 +178,11 @@ function parentLayersOf(ctx, parentSession, cwd) {
     const agent = ctx.agents.get(parentSession)
     if (agent) return layersOf(agent)
   }
-  if (parentSession && ctx.sessions && typeof ctx.sessions.get === 'function') {
-    const session = ctx.sessions.get(parentSession)
-    if (session) return layersOf(session)
+  if (parentSession && ctx.sessions && typeof ctx.sessions.binding === 'function') {
+    try {
+      const bound = ctx.sessions.binding(parentSession)
+      if (bound && bound.session) return layersOf(bound.session)
+    } catch { /* binding unavailable */ }
   }
   return resolveLayersSync(dshHome, { sessionId: parentSession, cwd })
 }
@@ -223,7 +224,7 @@ function clampRequest(request) {
   if (roleReason) {
     const err = new Error(roleReason)
     err.name = 'SubagentRoleError'
-    const logged = operation({ plugin: 'dsh-agent-delegate', feature: 'child-session', operation: 'start_child', sessionId: parentIdOf(request.parent) })
+    const logged = operation({ plugin: 'dsh-claw-delegate', feature: 'child-session', operation: 'start_child', sessionId: parentIdOf(request.parent) })
     logged.start()
     logged.reject(CODES.DELEGATE_ROLE_DENIED, { reason: 'role_denied' })
     throw err
@@ -233,7 +234,7 @@ function clampRequest(request) {
   if (budgetReason) {
     const err = new Error(budgetReason)
     err.name = 'SubagentBudgetError'
-    const logged = operation({ plugin: 'dsh-agent-delegate', feature: 'child-session', operation: 'start_child', sessionId: parentIdOf(request.parent) })
+    const logged = operation({ plugin: 'dsh-claw-delegate', feature: 'child-session', operation: 'start_child', sessionId: parentIdOf(request.parent) })
     logged.start()
     logged.reject(CODES.DELEGATE_BUDGET_DENIED, { reason: 'budget' })
     throw err
@@ -243,7 +244,7 @@ function clampRequest(request) {
   if (reason) {
     const err = new Error(reason)
     err.name = 'SubagentDepthError'
-    const logged = operation({ plugin: 'dsh-agent-delegate', feature: 'child-session', operation: 'start_child', sessionId: parentIdOf(request.parent) })
+    const logged = operation({ plugin: 'dsh-claw-delegate', feature: 'child-session', operation: 'start_child', sessionId: parentIdOf(request.parent) })
     logged.start()
     logged.reject(CODES.DELEGATE_DEPTH_DENIED, { reason: 'depth' })
     throw err
@@ -262,7 +263,7 @@ function prepareChildCreate(ctx, options) {
   const role = bag && bag.role ? bag.role : spec.role
   const roleReason = roleDenyReason(parentPolicy, role, parentRecord && parentRecord.roles, spec.supplied)
   if (roleReason) {
-    const denied = operation({ plugin: 'dsh-agent-delegate', feature: 'child-session', operation: 'create_child', sessionId: meta.parentSession, childSessionId: options.sessionId })
+    const denied = operation({ plugin: 'dsh-claw-delegate', feature: 'child-session', operation: 'create_child', sessionId: meta.parentSession, childSessionId: options.sessionId })
     denied.start()
     denied.reject(CODES.DELEGATE_ROLE_DENIED, { reason: 'role_denied' })
     const err = new Error(roleReason)
@@ -276,7 +277,7 @@ function prepareChildCreate(ctx, options) {
   const budget = budgetOf(parentPolicy, parentRecord)
   const budgetReason = budgetDenyReason(liveCount(meta.parentSession), budget.maxChildren)
   if (budgetReason) {
-    const op = operation({ plugin: 'dsh-agent-delegate', feature: 'child-session', operation: 'create_child', sessionId: meta.parentSession })
+    const op = operation({ plugin: 'dsh-claw-delegate', feature: 'child-session', operation: 'create_child', sessionId: meta.parentSession })
     op.start()
     op.reject(CODES.DELEGATE_BUDGET_DENIED, { reason: 'budget' })
     const err = new Error(budgetReason)
@@ -332,7 +333,7 @@ function prepareChildCreate(ctx, options) {
     appendAudit(dshHome, { kind: 'worktree', sessionId: options.sessionId, worktree: created.path })
     return { ...options, meta: { ...meta, cwd: created.path } }
   } catch (error) {
-    const op = operation({ plugin: 'dsh-agent-delegate', feature: 'child-session', operation: 'create_child', sessionId: meta.parentSession, childSessionId: options.sessionId })
+    const op = operation({ plugin: 'dsh-claw-delegate', feature: 'child-session', operation: 'create_child', sessionId: meta.parentSession, childSessionId: options.sessionId })
     op.start()
     op.stage('worktree')
     try {
@@ -446,7 +447,7 @@ function cleanupChild(sessionId) {
   if (!record) return
   const handoff = captureHandoff(record)
   if (handoff && !handoff.empty) {
-    const op = operation({ plugin: 'dsh-agent-delegate', feature: 'handoff', operation: 'child_handoff', sessionId: record.parentSession, childSessionId: sessionId })
+    const op = operation({ plugin: 'dsh-claw-delegate', feature: 'handoff', operation: 'child_handoff', sessionId: record.parentSession, childSessionId: sessionId })
     op.start()
     op.success({ code: CODES.DELEGATE_HANDOFF_SAVED, fileCount: (handoff.files || []).length, bytes: handoff.bytes })
   }
@@ -517,31 +518,39 @@ function bagFromExec(exec) {
   return null
 }
 
-function applyHandoffResult(result, childId, maxBytes) {
+function applyHandoffResult(result, childId) {
   if (!childId) return result
   const record = loadChildSync(dshHome, childId)
   if (!record) return result
   const latest = latestTask(dshHome, record.parentSession, record.taskKey)
-  if (isStaleRecord(record, latest)) {
-    const stale = operation({ plugin: 'dsh-agent-delegate', feature: 'handoff', operation: 'child_handoff', sessionId: record.parentSession, childSessionId: childId })
-    stale.start()
-    stale.reject(CODES.DELEGATE_STALE_RESULT, { reason: 'stale_generation' })
-    return { kind: 'block', feedback: [{ type: 'text', text: staleDenyReason() }] }
-  }
   if (!result || typeof result !== 'object') return result
   if (result.kind === 'block' || result.kind === 'deny') return result
-  const handoff = captureHandoff(record)
-  const value = result.value
-  let next = result
-  if (value && typeof value === 'object' && Array.isArray(value.output)) {
-    next = {
-      kind: 'accept',
-      value: { ...value, output: trimContentBlocks(value.output, maxBytes) },
+  try {
+    const value = result.value
+    let next = result
+    if (value && typeof value === 'object' && Array.isArray(value.output)) {
+      next = {
+        kind: 'accept',
+        value: { ...value, output: prepareChildDelivery(record, latest, value.output) },
+      }
+    } else if (typeof result.content === 'string') {
+      const trimmed = prepareChildDelivery(record, latest, [{ type: 'text', text: result.content }])
+      const text = trimmed && trimmed[0] && typeof trimmed[0].text === 'string' ? trimmed[0].text : result.content
+      next = { ...result, content: text }
+    } else {
+      prepareChildDelivery(record, latest, [])
     }
-  } else if (typeof result.content === 'string') {
-    next = { ...result, content: trimHandoff(result.content, maxBytes).text }
+    const handoff = captureHandoff(record)
+    return attachHandoffNote(next, handoff, childId)
+  } catch (error) {
+    if (error && error.name === 'SubagentStaleError') {
+      const stale = operation({ plugin: 'dsh-claw-delegate', feature: 'handoff', operation: 'child_handoff', sessionId: record.parentSession, childSessionId: childId })
+      stale.start()
+      stale.reject(CODES.DELEGATE_STALE_RESULT, { reason: 'stale_generation' })
+      return { kind: 'block', feedback: [{ type: 'text', text: staleDenyReason() }] }
+    }
+    throw error
   }
-  return attachHandoffNote(next, handoff, childId)
 }
 
 function runHandoffAction(args, parentSession) {
@@ -558,7 +567,7 @@ function runHandoffAction(args, parentSession) {
     return { ok: false, error: 'handoff belongs to another parent' }
   }
   const op = operation({
-    plugin: 'dsh-agent-delegate',
+    plugin: 'dsh-claw-delegate',
     feature: 'handoff',
     operation: 'parent_' + action,
     sessionId: parentSession,
@@ -566,6 +575,29 @@ function runHandoffAction(args, parentSession) {
   })
   op.start()
   if (action === 'accept') {
+    const childRecord = loadChildSync(dshHome, child)
+    const generationRecord = childRecord || (row.taskKey
+      ? {
+        sessionId: child,
+        parentSession: row.parentSession || parentSession,
+        taskKey: row.taskKey,
+        generation: row.generation,
+        policy: null,
+      }
+      : null)
+    if (generationRecord && generationRecord.taskKey) {
+      const latest = latestTask(dshHome, generationRecord.parentSession, generationRecord.taskKey)
+      try {
+        prepareChildDelivery(generationRecord, latest, [])
+      } catch (error) {
+        if (error && error.name === 'SubagentStaleError') {
+          op.reject(CODES.DELEGATE_STALE_RESULT, { reason: 'stale_generation' })
+          appendAudit(dshHome, { kind: 'handoff-stale', sessionId: child, parentSession, error: error.message })
+          return { ok: false, status: 'stale', error: error.message }
+        }
+        throw error
+      }
+    }
     const result = applyHandoffToParent(dshHome, child)
     if (result.status === 'conflicted') {
       op.degraded(CODES.DELEGATE_HANDOFF_CONFLICT, { skipReason: 'conflict' })
@@ -607,9 +639,11 @@ function handoffTool() {
         return [{ type: 'text', text: JSON.stringify(value || {}, null, 2) }]
       },
     },
-    async execute(args, exec) {
-      const parentSession = parentIdOf(exec && exec.agent)
-      return { kind: 'accept', value: runHandoffAction(args || {}, parentSession) }
+    execute(args, exec) {
+      return runWithTrace(exec, async () => {
+        const parentSession = parentIdOf(exec && exec.agent)
+        return { kind: 'accept', value: runHandoffAction(args || {}, parentSession) }
+      })
     },
   }
 }
@@ -663,7 +697,7 @@ function reconcileOrphans(ctx) {
     }
     removeChildSync(dshHome, row.sessionId)
     appendAudit(dshHome, { kind: 'reconcile', sessionId: row.sessionId, worktree: row.worktree })
-    const op = operation({ plugin: 'dsh-agent-delegate', feature: 'child-session', operation: 'reconcile', sessionId: row.parentSession, childSessionId: row.sessionId })
+    const op = operation({ plugin: 'dsh-claw-delegate', feature: 'child-session', operation: 'reconcile', sessionId: row.parentSession, childSessionId: row.sessionId })
     op.start()
     op.degraded(CODES.DELEGATE_ORPHAN_RECONCILED, { state: 'clean', remainingArtifacts: [] })
   }
@@ -692,7 +726,7 @@ export function apply(ctx) {
         return orig.call(this, prepared)
       }
       const op = operation({
-        plugin: 'dsh-agent-delegate',
+        plugin: 'dsh-claw-delegate',
         feature: 'child-session',
         operation: 'create_child',
         sessionId: options.meta.parentSession,
@@ -741,21 +775,16 @@ export function apply(ctx) {
     optionalStops.push(wrapShell(ctx), wrapJobs(ctx))
   }
 
-  const stopReport = wrapMethod(ctx.subagents, 'reportFrom', function (orig, child, content, options) {
+  const stopSend = wrapMethod(ctx.subagents, 'sendMessage', function (orig, sender, targetId, content, options) {
     return Promise.resolve().then(() => {
-      const session = child && child.session
-      const record = session && session.id ? loadChildSync(dshHome, session.id) : null
-      if (record) {
+      const senderSession = sender && sender.session
+      const record = senderSession && senderSession.id ? loadChildSync(dshHome, senderSession.id) : null
+      if (record && targetId === record.parentSession) {
         const latest = latestTask(dshHome, record.parentSession, record.taskKey)
-        if (isStaleRecord(record, latest)) {
-          const err = new Error(staleDenyReason())
-          err.name = 'SubagentStaleError'
-          throw err
-        }
-        const budget = budgetOf(record.policy, record)
-        return orig.call(this, child, trimContentBlocks(content, budget.maxOutputBytes), options)
+        const trimmed = prepareChildDelivery(record, latest, content, budgetOf(record.policy, record).maxOutputBytes)
+        return orig.call(this, sender, targetId, trimmed, options)
       }
-      return orig.call(this, child, content, options)
+      return orig.call(this, sender, targetId, content, options)
     })
   })
   const stopGuard = ctx.tools && typeof ctx.tools.guard === 'function'
@@ -787,21 +816,20 @@ export function apply(ctx) {
         bag.jobId = job.jobId
       }
       if (!bag.role && !bag.jobWorktree && !isSubagentTool(exec && exec.name)) return next()
-      return runWithBag(bag, () => Promise.resolve().then(() => next()).then((result) => {
+      return runWithTrace(exec, () => runWithBag(bag, () => Promise.resolve().then(() => next()).then((result) => {
         if (bag.jobId) {
           const jobRecord = loadChildSync(dshHome, bag.jobId)
           return attachHandoffNote(result, captureHandoff(jobRecord), bag.jobId)
         }
         if (!isSubagentTool(exec && exec.name)) return result
-        const policy = policyOf(exec.agent)
-        return applyHandoffResult(result, bag.childId, budgetOf(policy, recordOf(exec.agent)).maxOutputBytes)
+        return applyHandoffResult(result, bag.childId)
       }).catch((error) => {
         if (bag.jobId) {
           const row = loadChildSync(dshHome, bag.jobId)
           if (row && !row.jobId) cleanupChild(bag.jobId)
         }
         throw error
-      }))
+      })))
     })
     : function () {}
 
@@ -818,51 +846,21 @@ export function apply(ctx) {
     })
     : function () {}
 
-  const optionalWeb = optionalService(ctx, 'webServer')
-  const stopRoutes = []
-  if (optionalWeb && typeof optionalWeb.register === 'function') {
-    const writeJson = (res, status, body) => {
-      res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' })
-      res.end(JSON.stringify(body))
-    }
-    stopRoutes.push(optionalWeb.register({
-      kind: 'exact',
-      path: '/dsh-agent-delegate/handoff',
-      handler: async (req, res) => {
-        if (req.method !== 'POST') {
-          writeJson(res, 405, { ok: false, error: 'method not allowed' })
-          return
-        }
-        const headers = req.headers || {}
-        if (headers['x-dsh-agent-delegate'] !== '1') {
-          writeJson(res, 403, { ok: false, error: 'missing csrf header' })
-          return
-        }
-        const chunks = []
-        for await (const chunk of req) chunks.push(chunk)
-        let body = {}
-        try {
-          body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {}
-        } catch {
-          writeJson(res, 400, { ok: false, error: 'invalid json body' })
-          return
-        }
-        writeJson(res, 200, runHandoffAction(body, body && body.parentSession))
-      },
-    }))
-  }
+  registerJsonRoute(ctx, {
+    path: '/api/dsh-claw/delegate/handoff',
+    handle: (body) => runHandoffAction(body, body && body.parentSession),
+  })
 
   ctx.effect(() => () => {
     if (typeof stopStart === 'function') stopStart()
     if (typeof stopContinuable === 'function') stopContinuable()
     if (typeof stopCreate === 'function') stopCreate()
-    if (typeof stopReport === 'function') stopReport()
+    if (typeof stopSend === 'function') stopSend()
     for (const stop of optionalStops) if (typeof stop === 'function') stop()
     if (typeof stopGuard === 'function') stopGuard()
     if (typeof stopPre === 'function') stopPre()
     if (typeof stopExecute === 'function') stopExecute()
     if (typeof stopEnd === 'function') stopEnd()
     if (typeof stopSessionStart === 'function') stopSessionStart()
-    for (const stop of stopRoutes) if (typeof stop === 'function') stop()
   })
 }

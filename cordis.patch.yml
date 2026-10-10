@@ -1,4 +1,4 @@
 # dsh bundle layer: delegation broker — depth, attenuation, write-child worktrees, partial deny.
 - insert:
-    - id: dsh-agent-delegate
-      name: dsh-agent-delegate
+    - id: dsh-claw-delegate
+      name: dsh-claw-delegate
