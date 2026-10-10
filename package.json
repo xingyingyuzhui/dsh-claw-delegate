@@ -1,6 +1,6 @@
 {
   "name": "dsh-claw-delegate",
-  "version": "0.3.0-rc.1",
+  "version": "0.3.0-rc.2",
   "description": "Delegation broker for DeepSeek Harness. 真实委派深度、角色衰减、并发预算、写入型 child 的 Git worktree，以及父任务验收后合入 patch。",
   "keywords": [
     "dsh",
@@ -39,10 +39,10 @@
     "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
-    "dsh-claw-core": "0.3.0-rc.1",
-    "dsh-claw-permissions": "0.3.0-rc.1",
-    "dsh-claw-policy": "0.3.0-rc.1",
-    "dsh-claw-observability": "0.3.0-rc.1"
+    "dsh-claw-core": "0.3.0-rc.2",
+    "dsh-claw-permissions": "0.3.0-rc.2",
+    "dsh-claw-policy": "0.3.0-rc.2",
+    "dsh-claw-observability": "0.3.0-rc.2"
   },
   "peerDependencies": {
     "@deepseek-ai/dsh": "^0.2.0-rc.1"
