@@ -639,9 +639,11 @@ function handoffTool() {
         return [{ type: 'text', text: JSON.stringify(value || {}, null, 2) }]
       },
     },
-    async execute(args, exec) {
-      const parentSession = parentIdOf(exec && exec.agent)
-      return { kind: 'accept', value: runHandoffAction(args || {}, parentSession) }
+    execute(args, exec) {
+      return runWithTrace(exec, async () => {
+        const parentSession = parentIdOf(exec && exec.agent)
+        return { kind: 'accept', value: runHandoffAction(args || {}, parentSession) }
+      })
     },
   }
 }
@@ -814,7 +816,7 @@ export function apply(ctx) {
         bag.jobId = job.jobId
       }
       if (!bag.role && !bag.jobWorktree && !isSubagentTool(exec && exec.name)) return next()
-      return runWithBag(bag, () => Promise.resolve().then(() => next()).then((result) => {
+      return runWithTrace(exec, () => runWithBag(bag, () => Promise.resolve().then(() => next()).then((result) => {
         if (bag.jobId) {
           const jobRecord = loadChildSync(dshHome, bag.jobId)
           return attachHandoffNote(result, captureHandoff(jobRecord), bag.jobId)
@@ -827,7 +829,7 @@ export function apply(ctx) {
           if (row && !row.jobId) cleanupChild(bag.jobId)
         }
         throw error
-      }))
+      })))
     })
     : function () {}
 
