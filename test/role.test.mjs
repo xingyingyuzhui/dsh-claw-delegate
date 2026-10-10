@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { applyPreset } from '../../dsh-session-permissions/perm-schema.mjs'
+import { applyPreset } from 'dsh-claw-permissions/schema'
 import { attenuateChildPolicy } from '../delegate-policy.mjs'
 import {
   allowedRolesOf,

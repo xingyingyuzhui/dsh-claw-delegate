@@ -40,6 +40,8 @@ export function normalizeHandoff(raw, sessionId) {
     empty: value.empty === true,
     status,
     method: typeof value.method === 'string' ? value.method : '',
+    taskKey: typeof value.taskKey === 'string' ? value.taskKey : '',
+    generation: Number.isFinite(Number(value.generation)) ? Number(value.generation) : 0,
     error: value.error && typeof value.error === 'object' && typeof value.error.message === 'string'
       ? { message: value.error.message }
       : null,
@@ -88,6 +90,9 @@ export function persistChildHandoff(home, child, collected) {
     bytes: info.bytes || 0,
     empty: !!info.empty,
     status: info.empty ? 'empty' : 'pending',
+    // Persist generation identity so accept can still reject stale after child cleanup.
+    taskKey: typeof child.taskKey === 'string' ? child.taskKey : '',
+    generation: Number.isFinite(Number(child.generation)) ? Number(child.generation) : 0,
   })
 }
 

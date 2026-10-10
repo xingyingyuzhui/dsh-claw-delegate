@@ -3,7 +3,7 @@ import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { applyPreset } from '../../dsh-session-permissions/perm-schema.mjs'
+import { applyPreset } from 'dsh-claw-permissions/schema'
 import { loadChildSync, removeChildSync, saveChildSync } from '../delegate-store.mjs'
 
 test('child records accept official UUID session ids', async () => {

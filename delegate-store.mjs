@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
-import { normalizePolicy } from '../dsh-session-permissions/perm-schema.mjs'
+import { normalizePolicy } from 'dsh-claw-permissions/schema'
 import { nextGeneration } from './delegate-handoff.mjs'
 
 export function defaultDshHome() {
